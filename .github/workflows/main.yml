@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-android:
-    name: Build Android APK
+    name: Build Kotoba APK
     runs-on: ubuntu-latest
 
     steps:
@@ -30,14 +30,38 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)"
+          fi
+
+          echo "Using sdkmanager: $SDKMANAGER"
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Install npm dependencies
         run: npm ci
 
       - name: Install Capacitor
-        run: npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
+        run: |
+          npm install --no-save \
+            @capacitor/core@7 \
+            @capacitor/cli@7 \
+            @capacitor/android@7
 
       - name: Build Kotoba web app
         run: npm run build
@@ -45,12 +69,17 @@ jobs:
       - name: Create Android project
         run: npx cap add android
 
-      - name: Sync web app to Android
+      - name: Sync Kotoba into Android
         run: npx cap sync android
 
       - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK
+        run: |
+          ls -lh android/app/build/outputs/apk/release/
+          test -f android/app/build/outputs/apk/release/app-release-unsigned.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -58,3 +87,4 @@ jobs:
           name: kotoba-release-apk
           path: android/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
+          retention-days: 30
